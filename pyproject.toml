@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-shellagent-plugin"
+description = "This repository provides utility nodes for defining inputs and outputs in ComfyUI workflows. These nodes are essential for running [a/ShellAgent](https://github.com/myshell-ai/ShellAgent) apps with ComfyUI, but they can also be used independently to specify input/output variables and their requirements explicitly."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["aiofiles", "pydantic", "opencv-python", "imageio-ffmpeg", "brotli", "# logfire"]
+
+[project.urls]
+Repository = "https://github.com/myshell-ai/ComfyUI-ShellAgent-Plugin"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-ShellAgent-Plugin"
+Icon = ""
