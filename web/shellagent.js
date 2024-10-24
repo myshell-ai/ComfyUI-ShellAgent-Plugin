@@ -176,8 +176,20 @@ app.registerExtension({
       addMenuHandler(nodeType, function (_, options) {
         if (this.widgets) {
           let toInput = [];
-
           for (const w of this.widgets) {
+            // todo: combo need to remove and convert back
+            // if (w.type === 'combo' && w.name === 'image') {
+            //   toInput.push({
+            //     content: `${w.name} <- Input Image`,
+            //     callback: () => {
+            //       this.convertWidgetToInput(w);
+            //       const node = addNode("ShellAgentPluginInputImage", this, { before: true });
+            //       const dvn = node.widgets.find(w => w.name === 'default_value')
+            //       dvn.value = w.value;
+            //       node.connect(0, this, 0);
+            //     }
+            //   })
+            // }
             if (["customtext"].indexOf(w.type) > -1) {
               toInput.push({
                 content: `${w.name} <- Input Text`,
@@ -191,7 +203,6 @@ app.registerExtension({
               })
             }
             if (["number"].indexOf(w.type) > -1) {
-
               toInput.push({
                 content: w.name,
                 submenu: {
@@ -221,7 +232,6 @@ app.registerExtension({
               })
             }
           }
-
           if (toInput.length) {
             options.unshift({
               content: "Convert to ShellAgent",
@@ -230,6 +240,44 @@ app.registerExtension({
               }
             })
           }
+        }
+
+        if (this.outputs) {
+          let toOutput = [];
+          for (const o of this.outputs) {
+            if (o.type === 'IMAGE') {
+              toOutput.push({
+                content: `${o.name} -> Save Image`,
+                callback: () => {
+                  const node = addNode("ShellAgentPluginSaveImage", this);
+                  // todo
+                  node.connect(0, this, 0);
+                }
+              })
+            }
+
+            if (o.type === 'STRING') {
+              toOutput.push({
+                content: `${o.name} -> Output Text`,
+                callback: () => {
+                  const node = addNode("ShellAgentPluginOutputText", this);
+                  // todo
+                  node.connect(0, this, 0);
+                }
+              })
+            }
+
+          }
+
+          if (toOutput.length) {
+            options.unshift({
+              content: "Convert to ShellAgent",
+              submenu: {
+                options: toOutput
+              }
+            })
+          }
+
         }
       })
     }
