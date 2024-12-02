@@ -368,9 +368,9 @@ app.registerExtension({
     addIn('IMAGE', 'ShellAgentPluginInputImage')
     addOut('IMAGE', 'ShellAgentPluginSaveImage')
     addOut('IMAGE', 'ShellAgentPluginSaveImages')
-    addOut('STRING', 'ShellAgentPluginOutputInteger')
-    addOut('STRING', 'ShellAgentPluginOutputFloat')
-    addOut('STRING', 'ShellAgentPluginOutputText')
+    // addOut('STRING', 'ShellAgentPluginOutputInteger')
+    // addOut('STRING', 'ShellAgentPluginOutputFloat')
+    // addOut('STRING', 'ShellAgentPluginOutputText')
   }
 });
 
