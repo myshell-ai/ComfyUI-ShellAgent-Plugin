@@ -169,6 +169,11 @@ class ShellAgentSaveAudios(SaveAudio):
         results = super().save_audio(audio, filename_prefix, prompt, extra_pnginfo)
         results["shellagent_kwargs"] = extra_kwargs
         return results
+
+    def save_flac(self, audio, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, **extra_kwargs):
+        results = super().save_flac(audio, filename_prefix, "flac", prompt, extra_pnginfo)
+        results["shellagent_kwargs"] = extra_kwargs
+        return results
     
     
 class ShellAgentSaveAudio(ShellAgentSaveAudios):
