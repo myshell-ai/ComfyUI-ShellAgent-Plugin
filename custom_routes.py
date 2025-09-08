@@ -29,9 +29,12 @@ import atexit
 from datetime import datetime
 import nodes
 import traceback
+import re
+import keyword
+import uuid
 
-from .dependency_checker import resolve_dependencies
-
+from .dependency_checker import resolve_dependencies, inspect_repo_version
+from folder_paths import base_path as BASE_PATH
 
 WORKFLOW_ROOT = "shellagent/comfy_workflow"
 
@@ -45,6 +48,14 @@ CustomNodeTypeMap = {
     "ShellAgentPluginSaveVideoVHS": "video",
 }
 
+# Regular expression for a valid Python variable name
+variable_name_pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+
+def is_valid_variable_name(name):
+    # Check if it matches the pattern and is not a keyword
+    if re.match(variable_name_pattern, name) and not keyword.iskeyword(name):
+        return True
+    return False
 
 def schema_validator(prompt):
     from nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
@@ -84,6 +95,9 @@ def schema_validator(prompt):
                 continue
             if hasattr(node_cls, "validate"):
                 schema = node_cls.validate(**node_info["inputs"])
+                # validate schema
+                if not is_valid_variable_name(schema["title"]):
+                    raise ValueError(f'`{schema["title"]}` is not a valid variable name!')
             else:
                 raise NotImplementedError("the validate is not implemented")
             schemas[mode][node_id] = schema
@@ -158,16 +172,56 @@ async def shellagent_export(request):
         # for fname, dict_to_save in fname_mapping.items():
         #     with open(os.path.join(save_root, fname), "w") as f:
         #         json.dump(dict_to_save, f, indent=2)
+        warning_message = ""
+        if dependency_results.get("black_list_nodes", []):
+            warning_message = "The following nodes cannot be deployed to myshell:\n"
+            for item in dependency_results["black_list_nodes"]:
+                warning_message += f"  {item['name']}: {item['reason']}\n"
+                
+        if len(schemas["inputs"]) + len(schemas["outputs"]) == 0:
+            warning_message += f"The workflow contains neither inputs nor outputs!\n"
         
         return_dict = {
             "success": True,
-            "dependencies": dependency_results,
+            "dependencies": dependency_results["dependencies"],
+            "warning_message": warning_message,
             "schemas": schemas
         }
     except Exception as e:
         status = 400
         return_dict = {
             "success": False,
-            "message": str(traceback.format_exc()),
+            "message_detail": str(traceback.format_exc()),
+            "message": str(e),
         }
     return web.json_response(return_dict, status=status)
+
+
+@server.PromptServer.instance.routes.post("/shellagent/inspect_version") # data same as queue prompt, plus workflow_name
+async def shellagent_inspect_version(request):
+    data = await request.json()
+    comfyui_version = inspect_repo_version(BASE_PATH)
+    comfyui_shellagent_plugin_version = inspect_repo_version(os.path.dirname(__file__))
+    return_dict = {
+        "comfyui_version": comfyui_version,
+        "comfyui_shellagent_plugin_version": comfyui_shellagent_plugin_version,
+    }
+    return web.json_response(return_dict, status=200)
+
+
+@server.PromptServer.instance.routes.post("/shellagent/get_mac_addr") # data same as queue prompt, plus workflow_name
+async def shellagent_get_mac_addr(request):
+    data = await request.json()
+    return_dict = {
+        "mac_addr": uuid.getnode()
+    }
+    return web.json_response(return_dict, status=200)
+
+@server.PromptServer.instance.routes.post("/shellagent/check_exist") # check if the file or folder exist
+async def shellagent_check_exist(request):
+    data = await request.json()
+
+    return_dict = {
+        "exist": uuid.getnode() == data["mac_addr"] and os.path.exists(data["path"]) # really exist, instead of same name
+    }
+    return web.json_response(return_dict, status=200)

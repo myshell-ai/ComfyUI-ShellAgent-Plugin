@@ -17,6 +17,7 @@ To install, either:
 - Input Image
 - Input Float
 - Input Integer
+- Input Video
 
 Each input node supports setting a default value and additional configuration options.
 
@@ -25,6 +26,9 @@ Each input node supports setting a default value and additional configuration op
 - Save Image
 - Save Images
 - Save Video - VHS
+- Output Text
+- Output Float
+- Output Integer
 
 ### Convert Widgets to ShellAgent Inputs
 

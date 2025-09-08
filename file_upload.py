@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import folder_paths
 
-from .utils import compute_sha256
+from .utils.utils import compute_sha256, get_alphanumeric_hash
 
 ext_to_type = {
     # image
@@ -27,7 +27,7 @@ ext_to_type = {
     '.m4a': 'audio/mp4',
 }
 
-def upload_file_to_myshell(local_file: str) -> str:
+def upload_file_to_myshell(local_file: str, target_path: str, is_abs) -> str:
     ''' Now we only support upload file one-by-one
     '''
     MYSHELL_KEY = os.environ.get('MYSHELL_KEY', "OPENSOURCE_FIXED")
@@ -51,8 +51,8 @@ def upload_file_to_myshell(local_file: str) -> str:
     response = requests.request("POST", server_url, headers=headers, files=files)
     if response.status_code == 200:
         end_time = time.time()
-        logging.info(f"{local_file} uploaded, time elapsed: {end_time - start_time}")
-        return [sha256sum, response.json()['url'], local_file]
+        logging.info(f"{local_file} uploaded, time elapsed: {end_time - start_time}, will be saved to {target_path}")
+        return [sha256sum, response.json()['url'], target_path, is_abs]
     else:
         raise Exception(
             f"[HTTP ERROR] {response.status_code} - {response.text} \n"
@@ -66,8 +66,11 @@ def collect_local_file(item, mapping_dict={}):
     abspath = os.path.abspath(item)
     input_abspath = os.path.join(input_dir, item)
     # required file type
+    is_abs = False
     if os.path.isfile(abspath):
         fpath = abspath
+        is_abs = True
+        
     elif os.path.isfile(input_abspath):
         fpath = input_abspath
     else:
@@ -75,7 +78,13 @@ def collect_local_file(item, mapping_dict={}):
     if fpath is not None:
         ext = os.path.splitext(fpath)[1]
         if ext.lower() in ext_to_type.keys():
-            mapping_dict[item] = fpath
+            if is_abs: # if use abs path, replace it
+                filename_hash = get_alphanumeric_hash(abspath)[:16]
+                count = len(mapping_dict)
+                target_path = f"/ShellAgentDeploy/ComfyUI/input/{filename_hash}_{count:06d}{ext}"
+                mapping_dict[item] = (fpath, target_path, is_abs)
+            else:
+                mapping_dict[item] = (fpath, fpath, is_abs)
             return
         else:
             return
@@ -86,7 +95,7 @@ def process_local_file_path_async(mapping_dict, max_workers=10):
     start_time = time.time()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tasks to the executor
-        futures = {executor.submit(upload_file_to_myshell, full_path): filename for filename, full_path in mapping_dict.items()}
+        futures = {executor.submit(upload_file_to_myshell, source_path, target_path, is_abs): filename for filename, (source_path, target_path, is_abs) in mapping_dict.items()}
         logging.info("submit done")
         # Collect the results as they complete
         for future in as_completed(futures):
@@ -95,7 +104,8 @@ def process_local_file_path_async(mapping_dict, max_workers=10):
                 result = future.result()
                 mapping_dict[filename] = result
             except Exception as e:
-                print(f"Error processing {filename}: {e}")
+                del mapping_dict[filename]
+                raise NotImplementedError(f"Error processing {filename}: {e}")
     end_time = time.time()
     logging.info(f"upload end, elapsed time: {end_time - start_time}")
     return

@@ -3,4 +3,6 @@ pydantic
 opencv-python
 imageio-ffmpeg
 brotli
+pillow_heif
+easydict
 # logfire

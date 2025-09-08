@@ -1,19 +1,45 @@
 {
-  "ComfyUI-Easy-Use": [
-    {
-      "name": "ComfyUI-Inspire-Pack",
-      "repo": "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git",
-      "commit": ""
-    },
-    {
-      "name": "ComfyUI-Advanced-ControlNet",
-      "repo": "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git",
-      "commit": ""
-    },
-    {
-        "name": "ComfyUI_smZNodes",
-        "repo": "https://github.com/shiimizu/ComfyUI_smZNodes.git",
-        "commit": ""
-      }
-  ]
+    "ComfyUI-Easy-Use": [
+        {
+            "name": "ComfyUI-Inspire-Pack",
+            "repo": "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git",
+            "commit": ""
+        },
+        {
+            "name": "ComfyUI-Advanced-ControlNet",
+            "repo": "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git",
+            "commit": ""
+        },
+        {
+            "name": "ComfyUI_smZNodes",
+            "repo": "https://github.com/shiimizu/ComfyUI_smZNodes.git",
+            "commit": ""
+        },
+        {
+            "name": "ComfyUI_IPAdapter_plus",
+            "repo": "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
+            "commit": ""
+        }
+    ],
+    "efficiency-nodes-comfyui": [
+        {
+            "name": "comfyui_controlnet_aux",
+            "repo": "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
+            "commit": ""
+        }
+    ],
+    "ComfyUI-Anyline": [
+        {
+            "name": "comfyui_controlnet_aux",
+            "repo": "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
+            "commit": ""
+        }
+    ],
+    "ComfyUI-Impact-Pack": [
+        {
+            "name": "ComfyUI-Impact-Subpack",
+            "repo": "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git",
+            "commit": ""
+        }
+    ]
 }

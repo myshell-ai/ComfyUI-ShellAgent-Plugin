@@ -1,6 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+
 app.registerExtension({
   name: "Shellagent.extension",
   async setup() {
@@ -37,11 +40,15 @@ app.registerExtension({
     });
   },
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
+    if (["ShellAgentPluginOutputText", "ShellAgentPluginOutputFloat", "ShellAgentPluginOutputInteger"].indexOf(nodeData.name) > -1) {
+      chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        this.convertWidgetToInput(this.widgets[0])
+      })
+    }
 
     if (["ShellAgentPluginInputText", "ShellAgentPluginInputFloat", "ShellAgentPluginInputInteger"].indexOf(nodeData.name) > -1) {
       chainCallback(nodeType.prototype, "onNodeCreated", function () {
         const widget = this.widgets.find(w => w.name === 'choices')
-
         this.addWidget('button', 'manage choices', null, () => {
           const container = document.createElement("div");
           Object.assign(container.style, {
@@ -93,7 +100,7 @@ app.registerExtension({
             try {
               arr = JSON.parse(widget.value)
             } catch { }
-          } else if(Array.isArray(widget.value)) {
+          } else if (Array.isArray(widget.value)) {
             arr = widget.value
           }
 
@@ -137,12 +144,45 @@ app.registerExtension({
       })
     }
 
+    if (['LoadImage', 'LoadImageMask'].indexOf(nodeData.name) > -1) {
+      addMenuHandler(nodeType, function (_, options) {
+        options.unshift({
+          content: "Replace with ShellAgent Input Image",
+          callback: () => {
+            const node = addNode("ShellAgentPluginInputImage", this, { before: true });
+
+            const dvn = node.widgets.find(w => w.name === 'default_value')
+            dvn.value = this.widgets.find(w => w.name === 'image')?.value
+
+            app.graph.links.filter(l => l != null)
+              .forEach(l => {
+                const tn = app.graph._nodes_by_id[l.target_id]
+                node.connect(0, tn, 0)
+              })
+            app.graph.remove(this);
+          }
+        })
+      })
+    }
+
     if (nodeData.name === "ShellAgentPluginInputImage") {
       if (
         nodeData?.input?.required?.default_value?.[1]?.image_upload === true
       ) {
         nodeData.input.required.upload = [
           "IMAGEUPLOAD",
+          { widget: "default_value", imageInputName: "default_value", image_upload: true },
+        ];
+      }
+    }
+
+    if (nodeData.name === "ShellAgentPluginInputAudio") {
+      if (
+        nodeData?.input?.required?.default_value?.[1]?.audio_upload === true
+      ) {
+        nodeData.input.required.audioUI = ["AUDIO_UI"];
+        nodeData.input.required.upload = [
+          "SHELLAGENT_AUDIOUPLOAD",
           { widget: "default_value" },
         ];
       }
@@ -151,7 +191,6 @@ app.registerExtension({
     if (nodeData.name === "ShellAgentPluginInputVideo") {
       addUploadWidget(nodeType, nodeData, "default_value");
       chainCallback(nodeType.prototype, "onNodeCreated", function () {
-        // const pathWidget = this.widgets.find((w) => w.name === "video");
         const pathWidget = this.widgets.find((w) => w.name === "default_value");
         chainCallback(pathWidget, "callback", (value) => {
           if (!value) {
@@ -174,59 +213,238 @@ app.registerExtension({
 
     if (nodeData.name.indexOf('ShellAgentPlugin') === -1) {
       addMenuHandler(nodeType, function (_, options) {
+
         if (this.widgets) {
           let toInput = [];
-
           for (const w of this.widgets) {
             if (["customtext"].indexOf(w.type) > -1) {
               toInput.push({
-                content: `${w.name} <- Input Text`,
-                callback: () => {
-                  this.convertWidgetToInput(w);
-                  const node = addNode("ShellAgentPluginInputText", this, { before: true });
-                  const dvn = node.widgets.find(w => w.name === 'default_value')
-                  dvn.value = w.value;
-                  node.connect(0, this, this.inputs.length - 1);
-                }
+                content: w.name,
+                submenu: {
+                  options: [
+                    {
+                      content: 'Input Text',
+                      callback: () => {
+                        this.convertWidgetToInput(w);
+                        const node = addNode("ShellAgentPluginInputText", this, { before: true });
+                        const dvn = node.widgets.find(w => w.name === 'default_value')
+                        dvn.value = w.value;
+                        node.connect(0, this, this.inputs.length - 1);
+                      }
+                    }
+                  ]
+                },
               })
             }
             if (["number"].indexOf(w.type) > -1) {
               toInput.push({
-                content: `${w.name} <- Input Interger`,
-                callback: () => {
-                  this.convertWidgetToInput(w);
-                  const node = addNode("ShellAgentPluginInputInteger", this, { before: true });
-                  const dvn = node.widgets.find(w => w.name === 'default_value')
-                  dvn.value = w.value;
-                  node.connect(0, this, this.inputs.length - 1);
-                }
-              })
-
-              toInput.push({
-                content: `${w.name} <- Input Float`,
-                callback: () => {
-                  this.convertWidgetToInput(w);
-                  const node = addNode("ShellAgentPluginInputFloat", this, { before: true });
-                  const dvn = node.widgets.find(w => w.name === 'default_value')
-                  dvn.value = w.value;
-                  node.connect(0, this, this.inputs.length - 1);
+                content: w.name,
+                submenu: {
+                  options: [
+                    {
+                      content: 'Input Interger',
+                      callback: () => {
+                        this.convertWidgetToInput(w);
+                        const node = addNode("ShellAgentPluginInputInteger", this, { before: true });
+                        const dvn = node.widgets.find(w => w.name === 'default_value')
+                        dvn.value = w.value;
+                        node.connect(0, this, this.inputs.length - 1);
+                      }
+                    },
+                    {
+                      content: 'Input Float',
+                      callback: () => {
+                        this.convertWidgetToInput(w);
+                        const node = addNode("ShellAgentPluginInputFloat", this, { before: true });
+                        const dvn = node.widgets.find(w => w.name === 'default_value')
+                        dvn.value = w.value;
+                        node.connect(0, this, this.inputs.length - 1);
+                      }
+                    }
+                  ]
                 }
               })
             }
           }
-
           if (toInput.length) {
             options.unshift({
-              content: "Convert to ShellAgent",
+              content: "Convert to ShellAgent (Input)",
               submenu: {
                 options: toInput
               }
             })
           }
         }
+
+        if (this.outputs) {
+          let toOutput = [];
+          for (const o of this.outputs) {
+            if (o.type === 'IMAGE') {
+              toOutput.push({
+                content: o.name,
+                submenu: {
+                  options: [
+                    {
+                      content: 'Save Image',
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginSaveImage", this);
+                        this.connect(0, node, 0);
+                      }
+                    },
+                    {
+                      content: 'Save Images',
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginSaveImages", this);
+                        this.connect(0, node, 0);
+                      }
+                    }
+                  ]
+                }
+
+              })
+            }
+
+            if (o.type === 'STRING') {
+              toOutput.push({
+                content: o.name,
+                submenu: {
+                  options: [
+                    {
+                      content: `Output Text`,
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginOutputText", this);
+                        this.connect(0, node, 0);
+                      }
+                    },
+                    {
+                      content: `Output Float`,
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginOutputFloat", this);
+                        this.connect(0, node, 0);
+                      }
+                    },
+                    {
+                      content: `Output Integer`,
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginOutputInteger", this);
+                        this.connect(0, node, 0);
+                      }
+                    }
+                  ]
+                }
+              })
+            }
+
+            if (o.type === "VHS_FILENAMES") {
+              toOutput.push({
+                content: o.name,
+                submenu: {
+                  options: [
+                    {
+                      content: `Save Video - VHS`,
+                      callback: () => {
+                        const node = addNode("ShellAgentPluginSaveVideoVHS", this);
+                        this.connect(0, node, 0);
+                      }
+                    }
+                  ]
+                }
+              })
+            }
+          }
+
+          if (toOutput.length) {
+            options.unshift({
+              content: "Connect to ShellAgent (Output)",
+              submenu: {
+                options: toOutput
+              }
+            })
+          }
+
+        }
       })
     }
   },
+
+  afterConfigureGraph(missingNodeTypes, app) {
+    function addIn(type, nodeId) {
+      if(LiteGraph.slot_types_default_in[type] == null) {
+        LiteGraph.slot_types_default_in[type] = []
+      }
+      if (LiteGraph.slot_types_default_in[type].indexOf(nodeId) === -1) {
+        LiteGraph.slot_types_default_in[type].unshift(nodeId)
+      }
+    }
+
+    function addOut(type, nodeId) {
+      if(LiteGraph.slot_types_default_out[type] == null) {
+        LiteGraph.slot_types_default_out[type] = []
+      }
+      if (LiteGraph.slot_types_default_out[type].indexOf(nodeId) === -1) {
+        LiteGraph.slot_types_default_out[type].unshift(nodeId)
+      }
+    }
+
+    addIn('IMAGE', 'ShellAgentPluginInputImage')
+    addIn('AUDIO', 'ShellAgentPluginInputAudio')
+    addOut('IMAGE', 'ShellAgentPluginSaveImage')
+    addOut('IMAGE', 'ShellAgentPluginSaveImages')
+    addOut('AUDIO', 'ShellAgentPluginSaveAudios')
+    addOut('AUDIO', 'ShellAgentPluginSaveAudio')
+    addOut('STRING', 'ShellAgentPluginOutputInteger')
+    addOut('STRING', 'ShellAgentPluginOutputFloat')
+    addOut('STRING', 'ShellAgentPluginOutputText')
+  },
+  getCustomWidgets() {
+    return {
+      SHELLAGENT_AUDIOUPLOAD(node, inputName) {
+        const audioWidget = node.widgets.find(
+          (w) => w.name === "default_value"
+        );
+        const audioUIWidget = node.widgets.find(
+          (w) => w.name === "audioUI"
+        );
+        const onAudioWidgetUpdate = /* @__PURE__ */ __name(() => {
+          audioUIWidget.element.src = api.apiURL(
+            getResourceURL(...splitFilePath(audioWidget.value))
+          );
+        }, "onAudioWidgetUpdate");
+        if (audioWidget.value) {
+          onAudioWidgetUpdate();
+        }
+        audioWidget.callback = onAudioWidgetUpdate;
+        const onGraphConfigured = node.onGraphConfigured;
+        node.onGraphConfigured = function() {
+          onGraphConfigured?.apply(this, arguments);
+          if (audioWidget.value) {
+            onAudioWidgetUpdate();
+          }
+        };
+        const fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "audio/*";
+        fileInput.style.display = "none";
+        fileInput.onchange = () => {
+          if (fileInput.files.length) {
+            uploadFileAudio(audioWidget, audioUIWidget, fileInput.files[0], true);
+          }
+        };
+        const uploadWidget = node.addWidget(
+          "button",
+          inputName,
+          /* value=*/
+          "",
+          () => {
+            fileInput.click();
+          },
+          { serialize: false }
+        );
+        uploadWidget.label = "choose file to upload";
+        return { widget: uploadWidget };
+      }
+    };
+  }
 });
 
 function addMenuHandler(nodeType, cb) {
@@ -599,4 +817,55 @@ function addLoadVideoCommon(nodeType, nodeData) {
       }
     });
   });
+}
+
+function getResourceURL(subfolder, filename, type = "input") {
+  const params = [
+    "filename=" + encodeURIComponent(filename),
+    "type=" + type,
+    "subfolder=" + subfolder,
+    app.getRandParam().substring(1)
+  ].join("&");
+  return `/view?${params}`;
+}
+
+function splitFilePath(path) {
+  const folder_separator = path.lastIndexOf("/");
+  if (folder_separator === -1) {
+    return ["", path];
+  }
+  return [
+    path.substring(0, folder_separator),
+    path.substring(folder_separator + 1)
+  ];
+}
+
+async function uploadFileAudio(audioWidget, audioUIWidget, file2, updateNode, pasted = false) {
+  try {
+    const body = new FormData();
+    body.append("image", file2);
+    if (pasted) body.append("subfolder", "pasted");
+    const resp = await api.fetchApi("/upload/image", {
+      method: "POST",
+      body
+    });
+    if (resp.status === 200) {
+      const data = await resp.json();
+      let path = data.name;
+      if (data.subfolder) path = data.subfolder + "/" + path;
+      if (!audioWidget.options.values.includes(path)) {
+        audioWidget.options.values.push(path);
+      }
+      if (updateNode) {
+        audioUIWidget.element.src = api.apiURL(
+          getResourceURL(...splitFilePath(path))
+        );
+        audioWidget.value = path;
+      }
+    } else {
+      window.alert(resp.status + " - " + resp.statusText);
+    }
+  } catch (error) {
+    window.alert(error);
+  }
 }

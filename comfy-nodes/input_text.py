@@ -42,7 +42,7 @@ class ShellAgentPluginInputText:
             "title": kwargs["input_name"],
             "type": "string",
             "default": kwargs["default_value"],
-            "description": kwargs["description"],
+            "description": kwargs.get("description", ""),
         }
         if kwargs.get("choices", "") != "":
             schema["enums"] = eval(kwargs["choices"])
@@ -101,7 +101,7 @@ class ShellAgentPluginInputFloat:
             "title": kwargs["input_name"],
             "type": "number",
             "default": kwargs["default_value"],
-            "description": kwargs["description"],
+            "description": kwargs.get("description", ""),
         }
         if kwargs.get("choices", "") != "":
             schema["enums"] = eval(kwargs["choices"])
@@ -184,14 +184,58 @@ class ShellAgentPluginInputInteger:
     def run(self, input_name, default_value=None, display_name=None, description=None, **kwargs):
         return [default_value]
 
+class ShellAgentPluginInputBoolean:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "input_name": (
+                    "STRING",
+                    {"multiline": False, "default": "input_bool"},
+                ),
+            },
+            "optional": {
+                "default_value": (
+                    "BOOLEAN",
+                    {"default": False},
+                ),
+                "description": (
+                    "STRING",
+                    {"multiline": True, "default": ""},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("BOOLEAN",)
+    RETURN_NAMES = ("boolean",)
+
+    FUNCTION = "run"
+
+    CATEGORY = "shellagent"
+    
+    @classmethod
+    def validate(cls, **kwargs):
+        schema = {
+            "title": kwargs["input_name"],
+            "type": "boolean",
+            "default": kwargs["default_value"],
+            "description": kwargs.get("description", ""),
+        }
+        return schema
+
+    def run(self, input_name, default_value=None, display_name=None, description=None, **kwargs):
+        return [default_value]
+
 
 NODE_CLASS_MAPPINGS = {
     "ShellAgentPluginInputText": ShellAgentPluginInputText,
     "ShellAgentPluginInputFloat": ShellAgentPluginInputFloat,
-    "ShellAgentPluginInputInteger": ShellAgentPluginInputInteger
+    "ShellAgentPluginInputInteger": ShellAgentPluginInputInteger,
+    "ShellAgentPluginInputBoolean": ShellAgentPluginInputBoolean,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ShellAgentPluginInputText": "Input Text (ShellAgent Plugin)",
     "ShellAgentPluginInputFloat": "Input Float (ShellAgent Plugin)",
     "ShellAgentPluginInputInteger": "Input Integer (ShellAgent Plugin)",
+    "ShellAgentPluginInputBoolean": "Input Boolean (ShellAgent Plugin)",
 }

@@ -1,0 +1,5 @@
+{
+    "comfyui-ollama": {
+        "reason": "this node requires installing an extra software on linux, which is currently unsupported"
+    }
+}

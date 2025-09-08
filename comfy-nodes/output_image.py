@@ -75,12 +75,15 @@ class ShellAgentSaveVideoVHS:
         return schema
         
     def save_video(self, filenames, **kwargs):
-        status, (preview_image, video_path) = filenames
+        status, output_files = filenames
+        if len(output_files) == 0:
+            raise ValueError("the filenames are empty")
+        print("output_files", output_files)
+        video_path = output_files[-1]
         cwd = os.getcwd()
-        preview_image = os.path.relpath(preview_image)
-        video_path = os.path.relpath(video_path)
-        results = {"ui": {"image": [preview_image], "video": [video_path]}}
-        print(results)
+        # preview_image = os.path.relpath(preview_image)
+        video_path = os.path.relpath(video_path, folder_paths.base_path)
+        results = {"ui": {"video": [video_path]}}
         return results
     
     
