@@ -101,8 +101,17 @@ class ShellAgentPluginInputImage:
         w, h = None, None
 
         excluded_formats = ['MPO']
-        
-        for i in ImageSequence.Iterator(img):
+
+        # Determine frames to process
+        # Some PNG files contain MPO EXIF metadata causing PIL to misidentify them as MPO
+        # When this happens, ImageSequence.Iterator fails with "not a JPEG file"
+        try:
+            frames = list(ImageSequence.Iterator(img))
+        except SyntaxError:
+            # Fallback for misidentified formats (e.g., PNG with MPO metadata)
+            frames = [img]
+
+        for i in frames:
             i = node_helpers.pillow(ImageOps.exif_transpose, i)
 
             if i.mode == 'I':
