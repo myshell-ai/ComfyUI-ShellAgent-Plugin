@@ -6,6 +6,8 @@ import numpy as np
 import re
 import shutil
 import datetime
+import itertools
+import torch
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from comfy.utils import ProgressBar
@@ -148,6 +150,10 @@ class ShellAgentVideoCombineEncrypt:
                 "pingpong": ("BOOLEAN", {"default": False, "tooltip": "Reverse and append frames for seamless loop"}),
                 "encrypt": ("BOOLEAN", {"default": True, "tooltip": "If enabled, output files will be encrypted and cannot be viewed directly."}),
             },
+            "optional": {
+                "audio": ("AUDIO", {"tooltip": "Optional audio to mux with the video"}),
+                "vae": ("VAE", {"tooltip": "Optional VAE for decoding latent inputs"}),
+            },
             "hidden": {
                 "prompt": "PROMPT",
                 "extra_pnginfo": "EXTRA_PNGINFO",
@@ -165,6 +171,105 @@ class ShellAgentVideoCombineEncrypt:
     def VALIDATE_INPUTS(cls, format, **kwargs):
         return True
 
+    def _decode_latents_with_vae(self, latents, vae):
+        """
+        Decode latent tensors to images using VAE.
+        Processes in batches to manage memory usage.
+        """
+        downscale_ratio = getattr(vae, "downscale_ratio", 8)
+        width = latents.size(-1) * downscale_ratio
+        height = latents.size(-2) * downscale_ratio
+
+        # Calculate batch size based on resolution to avoid OOM
+        frames_per_batch = max(1, (1920 * 1080 * 16) // (width * height))
+
+        decoded_frames = []
+        num_latents = latents.size(0)
+
+        for i in range(0, num_latents, frames_per_batch):
+            batch = latents[i:i + frames_per_batch]
+            decoded_batch = vae.decode(batch)
+            # VAE decode returns tensor, collect frames
+            for frame in decoded_batch:
+                # Handle extra dimensions
+                while len(frame.shape) > 3:
+                    frame = frame[0]
+                decoded_frames.append(frame)
+
+        # Stack all decoded frames
+        return torch.stack(decoded_frames)
+
+    def _mux_audio_with_video(self, video_path, audio, frame_rate, total_frames, video_format):
+        """
+        Mux audio with video file using ffmpeg.
+        Returns the path to the new file with audio, or None if failed.
+        """
+        if FFMPEG_PATH is None:
+            return None
+
+        # Get audio waveform
+        try:
+            waveform = audio.get('waveform')
+            if waveform is None:
+                return None
+            sample_rate = audio.get('sample_rate', 44100)
+        except (AttributeError, TypeError):
+            return None
+
+        # Create output path with audio suffix
+        base, ext = os.path.splitext(video_path)
+        output_path = f"{base}-audio{ext}"
+
+        # Get audio channels
+        channels = waveform.size(1)
+
+        # Calculate minimum audio duration to match video
+        min_audio_dur = total_frames / frame_rate + 1
+
+        # Prepare audio data (convert from torch tensor to bytes)
+        # Audio waveform shape: (1, channels, samples) -> need (samples, channels) for f32le format
+        audio_data = waveform.squeeze(0).transpose(0, 1).numpy().tobytes()
+
+        # Audio codec selection based on format
+        audio_codec = ["-c:a", "aac", "-b:a", "192k"]  # Default to AAC
+        if ext.lower() == ".webm":
+            audio_codec = ["-c:a", "libopus", "-b:a", "128k"]
+        elif ext.lower() == ".avi":
+            audio_codec = ["-c:a", "mp3", "-b:a", "192k"]
+
+        # Build ffmpeg command for muxing
+        mux_args = [
+            FFMPEG_PATH,
+            "-v", "error",
+            "-y",  # Overwrite output
+            "-i", video_path,  # Input video
+            "-ar", str(sample_rate),
+            "-ac", str(channels),
+            "-f", "f32le",
+            "-i", "-",  # Input audio from stdin
+            "-c:v", "copy",  # Copy video stream
+        ] + audio_codec + [
+            "-af", f"apad=whole_dur={min_audio_dur}",
+            "-shortest",
+            output_path
+        ]
+
+        try:
+            result = subprocess.run(
+                mux_args,
+                input=audio_data,
+                capture_output=True,
+                check=True
+            )
+            return output_path
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
+            print(f"Warning: Failed to mux audio: {error_msg}")
+            return None
+        except Exception as e:
+            print(f"Warning: Failed to mux audio: {str(e)}")
+            return None
+
     def combine_video(
         self,
         images,
@@ -177,10 +282,28 @@ class ShellAgentVideoCombineEncrypt:
         encrypt=True,
         prompt=None,
         extra_pnginfo=None,
+        audio=None,
+        vae=None,
     ):
         if images is None or len(images) == 0:
             return ((True, []),)
-        
+
+        # Handle VAE decoding if vae is provided and images are latents
+        if vae is not None:
+            if isinstance(images, dict) and 'samples' in images:
+                # images is actually latents, decode with VAE
+                images = self._decode_latents_with_vae(images['samples'], vae)
+            elif isinstance(images, torch.Tensor) and len(images.shape) == 4 and images.shape[1] in [4, 16]:
+                # Looks like latent format (B, C, H, W) with typical latent channels
+                images = self._decode_latents_with_vae(images, vae)
+
+        # Ensure images is a tensor
+        if isinstance(images, dict) and 'samples' in images:
+            images = images['samples']
+
+        if isinstance(images, torch.Tensor) and images.size(0) == 0:
+            return ((True, []),)
+
         num_frames = len(images)
         pbar = ProgressBar(num_frames)
         first_image = images[0]
@@ -235,22 +358,47 @@ class ShellAgentVideoCombineEncrypt:
             num_frames = len(images)
         
         format_type, format_ext = format.split("/")
-        
+
+        # Track the main output file for audio muxing
+        video_file_path = None
+        total_frames_output = num_frames
+        video_format_config = None
+
         if format_type == "image":
-            # Use PIL for gif/webp
+            # Use PIL for gif/webp - audio not supported for image formats
             self._create_animated_image(
-                images, full_output_folder, filename, counter, 
-                format_ext, frame_rate, loop_count, quality, 
+                images, full_output_folder, filename, counter,
+                format_ext, frame_rate, loop_count, quality,
                 output_files, pbar, num_frames
             )
         else:
             # Use ffmpeg for video formats
-            self._create_video(
+            video_file_path, total_frames_output, video_format_config = self._create_video(
                 images, full_output_folder, filename, counter,
                 format_ext, frame_rate, loop_count, quality,
                 output_files, pbar, first_image
             )
-        
+
+            # Handle audio muxing for video formats
+            if audio is not None and video_file_path is not None:
+                # Check if audio has valid waveform
+                audio_waveform = None
+                try:
+                    audio_waveform = audio.get('waveform') if isinstance(audio, dict) else None
+                except (AttributeError, TypeError):
+                    pass
+
+                if audio_waveform is not None:
+                    audio_output_path = self._mux_audio_with_video(
+                        video_file_path,
+                        audio,
+                        frame_rate,
+                        total_frames_output,
+                        video_format_config
+                    )
+                    if audio_output_path is not None and os.path.exists(audio_output_path):
+                        output_files.append(audio_output_path)
+
         # Encrypt all output files if encryption is enabled
         if encrypt:
             for filepath in output_files:
@@ -305,7 +453,10 @@ class ShellAgentVideoCombineEncrypt:
     def _create_video(self, images, output_folder, filename, counter,
                       format_ext, frame_rate, loop_count, quality,
                       output_files, pbar, first_image):
-        """Create video using ffmpeg."""
+        """
+        Create video using ffmpeg.
+        Returns tuple of (video_file_path, total_frames, video_format_dict).
+        """
         if FFMPEG_PATH is None:
             raise ProcessLookupError(
                 "ffmpeg is required for video outputs and could not be found.\n"
@@ -314,28 +465,28 @@ class ShellAgentVideoCombineEncrypt:
                 "  - Linux: sudo apt install ffmpeg\n"
                 "  - Or install imageio-ffmpeg: pip install imageio-ffmpeg"
             )
-        
+
         # Get format configuration
         video_format = VIDEO_FORMATS.get(format_ext, VIDEO_FORMATS["h264-mp4"])
-        
+
         # Calculate dimensions with alignment
         height, width = first_image.shape[0], first_image.shape[1]
         dim_alignment = video_format.get("dim_alignment", 2)
-        
+
         # Ensure dimensions are divisible by alignment
         aligned_width = ((width + dim_alignment - 1) // dim_alignment) * dim_alignment
         aligned_height = ((height + dim_alignment - 1) // dim_alignment) * dim_alignment
-        
+
         dimensions = f"{aligned_width}x{aligned_height}"
-        
+
         # Output file path
         extension = video_format.get("extension", "mp4")
         file = f"{filename}_{counter:05}.{extension}"
         file_path = os.path.join(output_folder, file)
-        
+
         # Adjust quality based on format
         main_pass = video_format["main_pass"].copy()
-        
+
         # Map quality (1-100) to CRF (51-0) for x264/x265, or to appropriate scale
         if "-crf" in main_pass:
             crf_index = main_pass.index("-crf") + 1
@@ -347,10 +498,10 @@ class ShellAgentVideoCombineEncrypt:
             # For MJPEG: quality 100 -> 1, quality 1 -> 31
             q_value = int(1 + ((100 - quality) / 100 * 30))
             main_pass[q_index] = str(q_value)
-        
+
         # Build ffmpeg command
         args = [
-            FFMPEG_PATH, 
+            FFMPEG_PATH,
             "-v", "error",
             "-y",  # Overwrite output
             "-f", "rawvideo",
@@ -359,13 +510,14 @@ class ShellAgentVideoCombineEncrypt:
             "-r", str(frame_rate),
             "-i", "-",  # Read from stdin
         ] + main_pass + [file_path]
-        
+
         # Prepare frame data with padding if needed
         frame_data_list = []
+        total_frames = 0
         for img in images:
             img_bytes = tensor_to_bytes(img)
             h, w = img_bytes.shape[:2]
-            
+
             # Pad to aligned dimensions if necessary
             if h != aligned_height or w != aligned_width:
                 padded = np.zeros((aligned_height, aligned_width, 3), dtype=np.uint8)
@@ -374,9 +526,10 @@ class ShellAgentVideoCombineEncrypt:
             else:
                 frame_data_list.append(img_bytes.tobytes())
             pbar.update(1)
-        
+            total_frames += 1
+
         frame_data = b''.join(frame_data_list)
-        
+
         # Run ffmpeg
         try:
             result = subprocess.run(
@@ -396,8 +549,9 @@ class ShellAgentVideoCombineEncrypt:
                 f"ffmpeg not found at: {FFMPEG_PATH}\n"
                 "Please ensure ffmpeg is properly installed."
             )
-        
+
         output_files.append(file_path)
+        return file_path, total_frames, video_format
 
 
 NODE_CLASS_MAPPINGS = {
