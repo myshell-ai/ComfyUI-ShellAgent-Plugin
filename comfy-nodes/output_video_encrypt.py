@@ -89,33 +89,65 @@ FFMPEG_PATH = find_ffmpeg()
 VIDEO_FORMATS = {
     "h264-mp4": {
         "extension": "mp4",
-        "main_pass": ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p"],
+        "main_pass": ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"],
         "dim_alignment": 2,
-        "description": "H.264 MP4 - Best compatibility",
+        "description": "H.264 MP4 - Mac/iOS兼容 ✅ 推荐日常使用",
+        "compatible": True,  # Mac兼容标记
     },
     "h265-mp4": {
         "extension": "mp4",
         "main_pass": ["-c:v", "libx265", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"],
         "dim_alignment": 2,
-        "description": "H.265/HEVC MP4 - Better compression",
+        "description": "H.265/HEVC MP4 - 更好的压缩率",
+        "compatible": True,
     },
     "vp9-webm": {
         "extension": "webm",
         "main_pass": ["-c:v", "libvpx-vp9", "-crf", "30", "-b:v", "0", "-pix_fmt", "yuv420p"],
         "dim_alignment": 2,
-        "description": "VP9 WebM - Web friendly",
+        "description": "VP9 WebM - 网页友好",
+        "compatible": True,
     },
     "avi": {
         "extension": "avi",
         "main_pass": ["-c:v", "mjpeg", "-q:v", "3", "-pix_fmt", "yuvj420p"],
         "dim_alignment": 2,
-        "description": "Motion JPEG AVI",
+        "description": "Motion JPEG AVI - 旧格式",
+        "compatible": True,
     },
     "mov": {
         "extension": "mov",
-        "main_pass": ["-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p"],
+        "main_pass": ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"],
         "dim_alignment": 2,
-        "description": "QuickTime MOV",
+        "description": "QuickTime MOV - Mac原生格式",
+        "compatible": True,
+    },
+    # 新增: 高级H.264格式 - 允许自定义参数
+    "h264-advanced": {
+        "extension": "mp4",
+        "main_pass": [],  # 将由用户参数填充
+        "dim_alignment": 2,
+        "description": "H.264 高级模式 - 可自定义参数 ⚙️",
+        "advanced": True,  # 标记为高级模式
+        "compatible": "depends",  # 取决于用户选择的pix_fmt
+    },
+    # 新增: H.264 High 4:4:4 专业格式 (yuv444p)
+    "h264-high444": {
+        "extension": "mp4",
+        "main_pass": ["-c:v", "libx264", "-profile:v", "high444", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv444p"],
+        "dim_alignment": 2,
+        "description": "H.264 High444 - 专业后期 ⚠️ Mac不兼容",
+        "compatible": False,  # Mac不兼容
+        "professional": True,
+    },
+    # 新增: FFmpeg手动模式 - 完全自定义
+    "ffmpeg-manual": {
+        "extension": "mp4",
+        "main_pass": [],  # 完全由用户参数填充
+        "dim_alignment": 2,
+        "description": "FFmpeg 手动模式 - 专家级自定义 🔧",
+        "manual": True,  # 标记为手动模式
+        "compatible": "depends",
     },
 }
 
@@ -143,16 +175,54 @@ class ShellAgentVideoCombineEncrypt:
             "required": {
                 "images": ("IMAGE",),
                 "frame_rate": ("FLOAT", {"default": 24, "min": 1, "max": 120, "step": 1}),
-                "loop_count": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1, "tooltip": "Number of loops. 0 = infinite for GIF/WebP"}),
+                "loop_count": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1, "tooltip": "循环次数。0 = GIF/WebP无限循环"}),
                 "filename_prefix": ("STRING", {"default": "ShellAgent_Encrypted"}),
                 "format": (get_format_list(),),
-                "quality": ("INT", {"default": 85, "min": 1, "max": 100, "step": 1, "tooltip": "Quality level (higher = better quality, larger file)"}),
-                "pingpong": ("BOOLEAN", {"default": False, "tooltip": "Reverse and append frames for seamless loop"}),
-                "encrypt": ("BOOLEAN", {"default": True, "tooltip": "If enabled, output files will be encrypted and cannot be viewed directly."}),
+                "quality": ("INT", {"default": 85, "min": 1, "max": 100, "step": 1, "tooltip": "质量等级 (越高质量越好,文件越大)"}),
+                "pingpong": ("BOOLEAN", {"default": False, "tooltip": "反转并追加帧以实现无缝循环"}),
+                "encrypt": ("BOOLEAN", {"default": True, "tooltip": "如果启用,输出文件将被加密,无法直接查看"}),
             },
             "optional": {
-                "audio": ("AUDIO", {"tooltip": "Optional audio to mux with the video"}),
-                "vae": ("VAE", {"tooltip": "Optional VAE for decoding latent inputs"}),
+                "audio": ("AUDIO", {"tooltip": "可选音频,与视频混流"}),
+                "vae": ("VAE", {"tooltip": "可选VAE,用于解码latent输入"}),
+                # 高级参数 - 仅在选择高级格式时使用
+                "advanced_preset": (
+                    ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"],
+                    {"default": "medium", "tooltip": "编码速度预设 (越慢质量越好)"}
+                ),
+                "advanced_tune": (
+                    ["none", "film", "animation", "grain", "stillimage", "fastdecode", "zerolatency"],
+                    {"default": "none", "tooltip": "编码优化类型"}
+                ),
+                "advanced_crf": (
+                    "INT",
+                    {"default": 20, "min": 0, "max": 51, "step": 1, "tooltip": "质量控制 (0=无损, 20=推荐, 51=最差)"}
+                ),
+                "advanced_pix_fmt": (
+                    ["yuv420p", "yuv444p", "yuv444p10le"],
+                    {"default": "yuv420p", "tooltip": "像素格式 (yuv420p=Mac兼容, yuv444p=高质量但Mac不兼容)"}
+                ),
+                "advanced_colorspace": (
+                    ["bt709", "bt601", "bt2020nc"],
+                    {"default": "bt709", "tooltip": "色彩空间元数据"}
+                ),
+                "advanced_color_range": (
+                    ["tv", "pc"],
+                    {"default": "pc", "tooltip": "色彩范围 (tv=16-235, pc=0-255全范围)"}
+                ),
+                "advanced_x264_params": (
+                    "STRING",
+                    {"default": "", "tooltip": "高级x264参数,例如: aq-mode=3:aq-strength=0.8"}
+                ),
+                # 手动模式专用参数
+                "manual_videocodec": (
+                    "STRING",
+                    {"default": "libx264", "tooltip": "手动模式: 视频编解码器"}
+                ),
+                "manual_audio_codec": (
+                    "STRING",
+                    {"default": "aac", "tooltip": "手动模式: 音频编解码器"}
+                ),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -284,6 +354,17 @@ class ShellAgentVideoCombineEncrypt:
         extra_pnginfo=None,
         audio=None,
         vae=None,
+        # 高级参数 (可选)
+        advanced_preset="medium",
+        advanced_tune="none",
+        advanced_crf=20,
+        advanced_pix_fmt="yuv420p",
+        advanced_colorspace="bt709",
+        advanced_color_range="pc",
+        advanced_x264_params="",
+        # 手动模式参数 (可选)
+        manual_videocodec="libx264",
+        manual_audio_codec="aac",
     ):
         if images is None or len(images) == 0:
             return ((True, []),)
@@ -376,7 +457,11 @@ class ShellAgentVideoCombineEncrypt:
             video_file_path, total_frames_output, video_format_config = self._create_video(
                 images, full_output_folder, filename, counter,
                 format_ext, frame_rate, loop_count, quality,
-                output_files, pbar, first_image
+                output_files, pbar, first_image,
+                # 传递高级参数
+                advanced_preset, advanced_tune, advanced_crf, advanced_pix_fmt,
+                advanced_colorspace, advanced_color_range, advanced_x264_params,
+                manual_videocodec
             )
 
             # Handle audio muxing for video formats
@@ -452,9 +537,14 @@ class ShellAgentVideoCombineEncrypt:
 
     def _create_video(self, images, output_folder, filename, counter,
                       format_ext, frame_rate, loop_count, quality,
-                      output_files, pbar, first_image):
+                      output_files, pbar, first_image,
+                      advanced_preset="medium", advanced_tune="none", advanced_crf=20,
+                      advanced_pix_fmt="yuv420p", advanced_colorspace="bt709",
+                      advanced_color_range="pc", advanced_x264_params="",
+                      manual_videocodec="libx264"):
         """
         Create video using ffmpeg.
+        支持高级参数和手动模式。
         Returns tuple of (video_file_path, total_frames, video_format_dict).
         """
         if FFMPEG_PATH is None:
@@ -468,6 +558,60 @@ class ShellAgentVideoCombineEncrypt:
 
         # Get format configuration
         video_format = VIDEO_FORMATS.get(format_ext, VIDEO_FORMATS["h264-mp4"])
+
+        # ============ 处理高级模式和手动模式 ============
+        is_advanced = video_format.get("advanced", False)
+        is_manual = video_format.get("manual", False)
+        is_high444 = video_format.get("professional", False)
+
+        if is_advanced or is_manual:
+            # 高级模式或手动模式: 使用用户提供的参数构建main_pass
+            main_pass = [
+                "-c:v", manual_videocodec if is_manual else "libx264",
+                "-preset", advanced_preset,
+                "-crf", str(advanced_crf),
+                "-pix_fmt", advanced_pix_fmt,
+            ]
+
+            # 如果选择了yuv444p,需要指定profile
+            if advanced_pix_fmt in ["yuv444p", "yuv444p10le"]:
+                main_pass.insert(2, "-profile:v")
+                main_pass.insert(3, "high444")
+
+            # 添加tune参数(如果不是none)
+            if advanced_tune and advanced_tune != "none":
+                main_pass.extend(["-tune", advanced_tune])
+
+            # 添加色彩空间元数据
+            main_pass.extend([
+                "-color_range", advanced_color_range,
+                "-colorspace", advanced_colorspace,
+                "-color_primaries", advanced_colorspace,
+                "-color_trc", advanced_colorspace,
+            ])
+
+            # 添加x264高级参数(如果提供)
+            if advanced_x264_params and advanced_x264_params.strip():
+                main_pass.extend(["-x264-params", advanced_x264_params.strip()])
+
+            # 添加faststart(MP4优化)
+            if extension == "mp4":
+                main_pass.extend(["-movflags", "+faststart"])
+
+            # 更新video_format字典以便后续使用
+            video_format = video_format.copy()
+            video_format["main_pass"] = main_pass
+        elif is_high444:
+            # High444专业模式: 已经预配置好了,但可以调整CRF
+            main_pass = video_format["main_pass"].copy()
+            # 用户可能想调整质量
+            if "-crf" in main_pass:
+                crf_index = main_pass.index("-crf") + 1
+                main_pass[crf_index] = str(advanced_crf) if advanced_crf != 20 else main_pass[crf_index]
+        else:
+            # 标准模式: 使用预设配置
+            main_pass = video_format["main_pass"].copy()
+        # ============ 高级模式处理结束 ============
 
         # Calculate dimensions with alignment
         height, width = first_image.shape[0], first_image.shape[1]
@@ -484,20 +628,20 @@ class ShellAgentVideoCombineEncrypt:
         file = f"{filename}_{counter:05}.{extension}"
         file_path = os.path.join(output_folder, file)
 
-        # Adjust quality based on format
-        main_pass = video_format["main_pass"].copy()
-
-        # Map quality (1-100) to CRF (51-0) for x264/x265, or to appropriate scale
-        if "-crf" in main_pass:
-            crf_index = main_pass.index("-crf") + 1
-            # Quality 100 -> CRF 0, Quality 1 -> CRF 51
-            crf_value = int(51 - (quality / 100 * 51))
-            main_pass[crf_index] = str(crf_value)
-        elif "-q:v" in main_pass:
-            q_index = main_pass.index("-q:v") + 1
-            # For MJPEG: quality 100 -> 1, quality 1 -> 31
-            q_value = int(1 + ((100 - quality) / 100 * 30))
-            main_pass[q_index] = str(q_value)
+        # 仅在标准模式下,根据quality参数调整CRF/质量值
+        # 高级模式和手动模式使用用户明确指定的参数
+        if not is_advanced and not is_manual:
+            # Map quality (1-100) to CRF (51-0) for x264/x265, or to appropriate scale
+            if "-crf" in main_pass:
+                crf_index = main_pass.index("-crf") + 1
+                # Quality 100 -> CRF 0, Quality 1 -> CRF 51
+                crf_value = int(51 - (quality / 100 * 51))
+                main_pass[crf_index] = str(crf_value)
+            elif "-q:v" in main_pass:
+                q_index = main_pass.index("-q:v") + 1
+                # For MJPEG: quality 100 -> 1, quality 1 -> 31
+                q_value = int(1 + ((100 - quality) / 100 * 30))
+                main_pass[q_index] = str(q_value)
 
         # Build ffmpeg command
         args = [
