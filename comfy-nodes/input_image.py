@@ -196,7 +196,7 @@ class ShellAgentPluginInputImage:
                 if encrypt:
                     decoded_image = xor_decrypt_bytes(decoded_image, ENCRYPTION_KEY)
 
-                image = Image.open(BytesIO(decoded_image))
+                image = safe_open_image(decoded_image)
             else:
                 if not os.path.isfile(image_path): # abs path
                     # local path
