@@ -14,6 +14,26 @@ from pillow_heif import register_heif_opener
 
 register_heif_opener()
 
+# Fixed encryption key - matches output_video_encrypt.py
+ENCRYPTION_KEY = b"ShellAgentSecretKey2024!"
+
+
+def xor_decrypt_bytes(data: bytes, key: bytes) -> bytes:
+    """
+    Fast XOR decryption using NumPy vectorization.
+    XOR encryption is symmetric, so decryption uses the same operation.
+    """
+    data_array = np.frombuffer(data, dtype=np.uint8)
+
+    # Create repeated key array matching data length
+    key_array = np.frombuffer(key * ((len(data) // len(key)) + 1), dtype=np.uint8)[:len(data)]
+
+    # Vectorized XOR - 50-100x faster than Python loop
+    decrypted = np.bitwise_xor(data_array, key_array)
+
+    return decrypted.tobytes()
+
+
 def safe_open_image(image_bytes):
     try:
         image_pil = Image.open(BytesIO(image_bytes))
@@ -55,6 +75,10 @@ class ShellAgentPluginInputImage:
                 "description": (
                     "STRING",
                     {"multiline": False, "default": "", "forceInput": False},
+                ),
+                "encrypt": (
+                    "BOOLEAN",
+                    {"default": False, "tooltip": "If enabled, the image file will be decrypted before loading (must be encrypted with XOR using ShellAgentSecretKey2024!)"},
                 ),
             }
         }
@@ -145,7 +169,7 @@ class ShellAgentPluginInputImage:
         return (output_image, output_mask)
 
 
-    def run(self, input_name, default_value=None, display_name=None, description=None):
+    def run(self, input_name, default_value=None, display_name=None, description=None, encrypt=False):
         image_path = default_value
         input_dir = folder_paths.get_input_directory()
         try:
@@ -154,19 +178,38 @@ class ShellAgentPluginInputImage:
                 from io import BytesIO
                 print("Fetching image from url: ", image_path)
                 response = requests.get(image_path)
-                image = safe_open_image(response.content)
+                image_bytes = response.content
+
+                # Decrypt if encryption is enabled
+                if encrypt:
+                    image_bytes = xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY)
+
+                image = safe_open_image(image_bytes)
             elif image_path.startswith('data:image/png;base64,') or image_path.startswith('data:image/jpeg;base64,') or image_path.startswith('data:image/jpg;base64,'):
                 import base64
                 from io import BytesIO
                 print("Decoding base64 image")
                 base64_image = image_path[image_path.find(",")+1:]
                 decoded_image = base64.b64decode(base64_image)
+
+                # Decrypt if encryption is enabled
+                if encrypt:
+                    decoded_image = xor_decrypt_bytes(decoded_image, ENCRYPTION_KEY)
+
                 image = Image.open(BytesIO(decoded_image))
             else:
                 if not os.path.isfile(image_path): # abs path
                     # local path
                     image_path = os.path.join(input_dir, image_path)
-                image = node_helpers.pillow(Image.open, image_path)
+
+                # For local files with encryption enabled, read as bytes and decrypt
+                if encrypt:
+                    with open(image_path, 'rb') as f:
+                        image_bytes = f.read()
+                    image_bytes = xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY)
+                    image = safe_open_image(image_bytes)
+                else:
+                    image = node_helpers.pillow(Image.open, image_path)
 
             return self.convert_image_mask(image)
             # image = ImageOps.exif_transpose(image)
