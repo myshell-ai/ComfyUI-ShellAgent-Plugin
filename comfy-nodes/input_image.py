@@ -34,11 +34,12 @@ def xor_decrypt_bytes(data: bytes, key: bytes) -> bytes:
     return decrypted.tobytes()
 
 
-def safe_open_image(image_bytes):
+def safe_open_image(image_bytes, log_error=True):
     try:
         image_pil = Image.open(BytesIO(image_bytes))
     except PIL.UnidentifiedImageError as e:
-        print(e)
+        if log_error:
+            print(e)
         # Convert response content (bytes) to a NumPy array
         image_array = np.frombuffer(image_bytes, np.uint8)
         
@@ -54,6 +55,34 @@ def safe_open_image(image_bytes):
         else:
             raise ValueError("The image cannot be identified by neither PIL nor OpenCV")
     return image_pil
+
+
+def open_image_bytes(image_bytes, decrypt=False):
+    if not decrypt:
+        return safe_open_image(image_bytes)
+
+    decrypted_bytes = xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY)
+    return safe_open_image(decrypted_bytes, log_error=False)
+
+
+def open_encrypted_image_file(image_path):
+    with open(image_path, 'rb') as f:
+        image_bytes = f.read()
+
+    try:
+        return open_image_bytes(image_bytes, decrypt=True)
+    except ValueError as decrypt_error:
+        try:
+            image = safe_open_image(image_bytes, log_error=False)
+        except Exception:
+            raise decrypt_error
+
+    encrypted_path = f"{image_path}.encrypted-{uuid.uuid4().hex}"
+    with open(encrypted_path, 'wb') as f:
+        f.write(xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY))
+    os.replace(encrypted_path, image_path)
+    return image
+
 
 class ShellAgentPluginInputImage:
     @classmethod
@@ -180,11 +209,7 @@ class ShellAgentPluginInputImage:
                 response = requests.get(image_path)
                 image_bytes = response.content
 
-                # Decrypt if encryption is enabled
-                if encrypt:
-                    image_bytes = xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY)
-
-                image = safe_open_image(image_bytes)
+                image = open_image_bytes(image_bytes, decrypt=encrypt)
             elif image_path.startswith('data:image/png;base64,') or image_path.startswith('data:image/jpeg;base64,') or image_path.startswith('data:image/jpg;base64,'):
                 import base64
                 from io import BytesIO
@@ -192,22 +217,15 @@ class ShellAgentPluginInputImage:
                 base64_image = image_path[image_path.find(",")+1:]
                 decoded_image = base64.b64decode(base64_image)
 
-                # Decrypt if encryption is enabled
-                if encrypt:
-                    decoded_image = xor_decrypt_bytes(decoded_image, ENCRYPTION_KEY)
-
-                image = safe_open_image(decoded_image)
+                image = open_image_bytes(decoded_image, decrypt=encrypt)
             else:
                 if not os.path.isfile(image_path): # abs path
                     # local path
                     image_path = os.path.join(input_dir, image_path)
 
-                # For local files with encryption enabled, read as bytes and decrypt
+                # Encrypt plain local inputs before downstream nodes can preview them.
                 if encrypt:
-                    with open(image_path, 'rb') as f:
-                        image_bytes = f.read()
-                    image_bytes = xor_decrypt_bytes(image_bytes, ENCRYPTION_KEY)
-                    image = safe_open_image(image_bytes)
+                    image = open_encrypted_image_file(image_path)
                 else:
                     image = node_helpers.pillow(Image.open, image_path)
 
